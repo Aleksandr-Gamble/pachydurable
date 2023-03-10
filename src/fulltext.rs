@@ -1,3 +1,8 @@
+//! The fulltext module contains the FullText trait
+//! This trait makes it easy to perform fulltext searches in postgres on a given table 
+//! and return struct instantiations corresponding to the fulltext hits. 
+//! 
+
 // standard library
 use std::vec::Vec;
 // crates.io
@@ -30,7 +35,7 @@ use crate::{err::GenericError, connect::ClientNoTLS};
 ///     description: Option<String>,
 /// }
 /// 
-/// impl Fulltext for Animal {
+/// impl FullText for Animal {
 ///     fn query_fulltext() ->  & 'static str {
 ///         "SELECT id, name, description
 ///         FROM animals
@@ -52,10 +57,11 @@ pub trait FullText {
     fn rowfunc_fulltext(row: &Row) -> Self;
 }
 
+
+/// call this function with an explicit type hint for Vec<T>, where T implements the FullText trait
 pub async fn exec_fulltext<T: FullText>(client: &ClientNoTLS, phrase: &str) -> Result<Vec<T>, GenericError> {
     let query = T::query_fulltext();
     let ts_expr = ts_expression(phrase);
-    println!("visibilis/postgres/exec_fulltext with phrase='{}', ts_expr='{}'", &phrase, &ts_expr);
     let mut hits = Vec::new();
     let rows = client.query(query,&[&ts_expr]).await?;
     for row in rows {
@@ -65,6 +71,8 @@ pub async fn exec_fulltext<T: FullText>(client: &ClientNoTLS, phrase: &str) -> R
     Ok(hits)
 }
 
+
+/// Convert a phrase to a postgres ts_expression
 pub fn ts_expression(phrase: &str) -> String {
     // Given a phrase like "crimson thread", convert it to a TS expression
     let mut prefixes = Vec::new();

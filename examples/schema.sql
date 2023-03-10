@@ -21,9 +21,12 @@ ON CONFLICT (name) DO NOTHING;
 CREATE TABLE IF NOT EXISTS foods (
     name VARCHAR NOT NULL PRIMARY KEY,
     color VARCHAR,
-    autocomp_tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple', name )) STORED
+    autocomp_tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple', name )) STORED,
+    fulltext_tsv tsvector GENERATED ALWAYS AS (to_tsvector('english', name || ' ' || color )) STORED
 );
 CREATE INDEX autocomp_foods ON foods USING GIN(autocomp_tsv);
+CREATE INDEX fulltext_foods ON foods USING GIN(fulltext_tsv);
+
 
 
 INSERT INTO foods (name, color) VALUES 
