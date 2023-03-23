@@ -7,5 +7,6 @@ pub mod connect;
 pub mod err;
 pub mod fulltext;
 pub mod primary_key;
+pub mod redis;
 
 
