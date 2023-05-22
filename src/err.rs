@@ -1,5 +1,6 @@
 use std::{error::Error, fmt};
 use serde::{Serialize, Deserialize};
+use tokio_postgres::Error as TokioPgError;
 
 pub type GenericError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -24,6 +25,34 @@ impl MissingRowError {
         MissingRowError{
             message: message.to_string()
         }
+    }
+}
+
+
+#[derive(Debug)]
+pub enum DiskError {
+    PG(TokioPgError),
+    MissingRow,
+}
+
+
+impl Error for DiskError{}
+
+impl fmt::Display for DiskError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "DiskError: {:?}", &self)
+    }
+}
+
+impl From<TokioPgError> for DiskError {
+    fn from(e: TokioPgError) -> Self {
+        DiskError::PG(e)
+    }
+}
+
+impl DiskError {
+    pub fn missing_row() -> Self {
+        DiskError::MissingRow
     }
 }
 
