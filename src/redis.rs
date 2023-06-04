@@ -70,8 +70,8 @@ pub trait Cacheable: Serialize + DeserializeOwned {
 /// If nothing is found in Postgres either, the None variant will be returned
 pub async fn cached_or_cache<T: Cacheable>(c: &ClientNoTLS, pool: &RedisPool, params: &[&(dyn ToSql + Sync)]) -> Result<Option<T>, GenericError> {
     let key = T::redis_key(params);
-    let opt: Option<T> = rediserde::get(pool, &key).await?;
-    match opt {
+    let cached: Option<T> = rediserde::get(pool, &key).await?;
+    match cached {
         Some(val) => Ok(Some(val)),
         None => {
             let query = T::query();
