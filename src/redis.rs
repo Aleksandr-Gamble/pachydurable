@@ -10,9 +10,14 @@
 //! IS_TSL: If set to anything, rediss will be used instead of redis
 
 use std::{env, time::Duration};
+use serde::{Serialize, Deserialize, de::DeserializeOwned};
+use async_trait::async_trait;
 use mobc::Pool;
 use mobc_redis::{RedisConnectionManager, redis::{AsyncCommands, RedisResult, Client, aio::Connection}};
-use crate::err::GenericError;
+use tokio_postgres::{row::Row, types::{ToSql}};
+
+use crate::err::{GenericError, DiskError};
+use crate::connect::ClientNoTLS;
 
 // constants for mobc redis connection pools
 // see https://blog.logrocket.com/using-redis-in-a-rust-web-service/
@@ -25,6 +30,63 @@ const OBSCURE_TEST_KEY: &'static str = "_OBSCURE_TEST_KEY_0";
 pub type RedisConn = Connection<RedisConnectionManager>;
 pub type RedisPool = Pool<RedisConnectionManager>;
 
+
+/// The cacheable trait lets you lookup an instance of a struct from some parameters using the cached_or_cache function.
+/// It will first check to see if a value has been cached in Redis
+/// If not, it will next check in postgres.
+/// If a value is found, it will be cahced and returned 
+/// If nothing is found in Postgres either, the None variant will be returned
+#[async_trait]
+pub trait Cacheable: Serialize + DeserializeOwned {
+
+    /// Redis keys caching instances of this type will be prefixed with this prefix
+    fn key_prefix() -> &'static str;
+
+    /// When a value is cached to redis, set the expiry in seconds until it is removed auomatically.
+    fn seconds_expiry() -> usize;
+
+    /// This method generates a key showing where to cache an instance of a struct in Redis
+    fn redis_key(params:&[&(dyn ToSql + Sync)]) -> String {
+        let mut key = Self::key_prefix().to_string();
+        for param in params {
+            key.push_str(&format!("_{:?}", param));
+        }
+        key
+    }
+
+    /// Define the query that should be used with the assocaited parameters (i.e. those used in redis_key()) 
+    /// to return an instance of the struct 
+    fn query() -> &'static str;
+
+    /// Define how to convert a postgres row to as instance of the struct 
+    fn from_row(row: &Row) -> Self;
+
+}
+
+/// The cacheable trait lets you lookup an instance of a struct from some parameters using the cached_or_cache function.
+/// It will first check to see if a value has been cached in Redis
+/// If not, it will next check in postgres.
+/// If a value is found, it will be cahced and returned 
+/// If nothing is found in Postgres either, the None variant will be returned
+pub async fn cached_or_cache<T: Cacheable>(c: &ClientNoTLS, pool: &RedisPool, params: &[&(dyn ToSql + Sync)]) -> Result<Option<T>, GenericError> {
+    let key = T::redis_key(params);
+    let opt: Option<T> = rediserde::get(pool, &key).await?;
+    match opt {
+        Some(val) => Ok(Some(val)),
+        None => {
+            let query = T::query();
+            let rows = c.query(query, params).await?;
+            match rows.get(0) {
+                None => Ok(None),
+                Some(row) => {
+                    let val = T::from_row(row);
+                    let _x = rediserde::set_ex(pool, &key, &val, T::seconds_expiry()).await?;
+                    Ok(Some(val))
+                }
+            }
+        }
+    }
+}
 
 /// Return a new connection pool from the mobc_redis::Client struct
 pub async fn new_pool_from_client(client: Client) -> Result<RedisPool, GenericError> {
@@ -120,6 +182,14 @@ pub mod rediserde {
         let mut rconn = pool.get().await?;
         let jz: String = serde_json::to_string(value)?;
         let _ : () = rconn.set(key, jz).await?;
+        Ok(())
+    }
+
+    /// This is like set but with an expiry 
+    pub async fn set_ex<T: Serialize>(pool: &RedisPool, key: &str, value: &T, seconds_expiry: usize) -> Result<(), GenericError> {
+        let mut rconn = pool.get().await?;
+        let jz: String = serde_json::to_string(value)?;
+        let _ : () = rconn.set_ex(key, jz, seconds_expiry).await?;
         Ok(())
     }
 
