@@ -89,6 +89,17 @@ pub async fn cached_or_cache<T: Cacheable>(c: &ClientNoTLS, pool: &RedisPool, pa
 }
 
 
+/// The PreWarmDepth indicates how many characters (1,2, or 3) should be used for pre-caching autocomplete results
+pub enum PreWarmDepth {
+    /// pre-warm the cache with 1-character deep results: i.e. 36 values
+    Char1,
+    /// pre-warm the cache with 1+2-character deep results: i.e. 36*(1+42) = 1,548 values
+    Char2,
+    /// pre-warm the cache with 1+2+3-character deep results: i.e. 36*(1+42)*(1+42) = 66,564 values
+    Char3,
+}
+
+
 /// The autocomplete introduces the AutoComp trait, which allows a vector of <WhoWhatWhere<PK>>
 /// to be returned by querying Postgres for a given phrase.   
 /// This CachedAutoComp trait is related (in fact, it requires for AutoComp to also be implemented):
@@ -97,8 +108,12 @@ pub async fn cached_or_cache<T: Cacheable>(c: &ClientNoTLS, pool: &RedisPool, pa
 /// for a cached value. If one cannot be found, the (non-cached) AutoComp trait is used to find 
 /// resulting hits, which are then cached and returned. 
 pub trait CachedAutoComp<PKC: Serialize+DeserializeOwned+std::marker::Send>: AutoComp<PKC> {
+    /// The data type is used in prefixing the redis key.
     fn dtype() -> &'static str;
+    /// The cahced value in redis will expire after this many seconds.
     fn seconds_expiry() -> usize;
+    /// This sets the depth (number of characters) to which a value will be cached in Redis. 
+    fn prewarm_depth() -> PreWarmDepth;
 }
 
 
@@ -144,9 +159,17 @@ pub async fn warm_the_cache<PKC: Serialize+DeserializeOwned+std::marker::Send, T
     for c1 in chars1.chars() {
         let mut phrase = c1.to_string();
         let _hits = recache::<PKC, T>(pool, c, &phrase).await?;
+        match T::prewarm_depth() {
+            PreWarmDepth::Char1 => continue,
+            _ => {}
+        }
         for c2 in chars23.chars() {
             phrase.push(c2);
             let _hits = recache::<PKC, T>(pool, c, &phrase).await?;
+            match T::prewarm_depth() {
+                PreWarmDepth::Char3 => {},
+                _ => continue
+            }
             for c3 in chars23.chars() {
                 phrase.push(c3);
                 let _hits = recache::<PKC, T>(pool, c, &phrase).await?;
