@@ -102,20 +102,58 @@ pub trait CachedAutoComp<PKC: Serialize+DeserializeOwned+std::marker::Send>: Aut
 }
 
 
-/// the cached_autocomp function will first look in Redis for cached autocomplete results before looking in Postgres.  
-/// See more detail under the CachedAutoComp trait. 
-pub async fn cached_autocomp<PKC: Serialize+DeserializeOwned+std::marker::Send, T: CachedAutoComp<PKC>+DeserializeOwned>(pool: &RedisPool, c: &ClientNoTLS, phrase: &str) -> Result<Vec<WhoWhatWhere<PKC>>, GenericError> {
+
+
+// generate the Redis key to use for cached autocomplete results for a given <T> and phrase
+fn autocomp_key<PKC: Serialize+DeserializeOwned+std::marker::Send, T: CachedAutoComp<PKC>>(phrase: &str) -> String {
     let lphrase = phrase.to_lowercase(); // Postgres tsquery is case insensitive by Redis keys are not
     let key = format!("autocomp_{}_{}", T::dtype(), &lphrase );
+    key
+}
+
+
+
+/// as the name implies, recache will redo the postgres query for autocomplete results for a given phrase and cache the value,
+/// overwiting any previous result. 
+pub async fn recache<PKC: Serialize+DeserializeOwned+std::marker::Send, T: CachedAutoComp<PKC>>(pool: &RedisPool, c: &ClientNoTLS, phrase: &str) -> Result<Vec<WhoWhatWhere<PKC>>, GenericError> {
+    let key = autocomp_key::<PKC, T>(&phrase);
+    let hits: Vec<WhoWhatWhere<PKC>> = <T as AutoComp<PKC>>::exec_autocomp(c, &phrase).await?;
+    let _x = rediserde::set_ex(pool, &key, &hits, T::seconds_expiry()).await?;
+    Ok(hits)
+}
+
+
+/// the cached_autocomp function will first look in Redis for cached autocomplete results before looking in Postgres.  
+/// See more detail under the CachedAutoComp trait. 
+pub async fn cached_autocomp<PKC: Serialize+DeserializeOwned+std::marker::Send, T: CachedAutoComp<PKC>>(pool: &RedisPool, c: &ClientNoTLS, phrase: &str) -> Result<Vec<WhoWhatWhere<PKC>>, GenericError> {
+    let key = autocomp_key::<PKC, T>(phrase);
     let cached: Option<Vec<WhoWhatWhere<PKC>>> = rediserde::get(pool, &key).await?;
     match cached {
         Some(hits) => Ok(hits),
-        None => {
-            let hits: Vec<WhoWhatWhere<PKC>> = <T as AutoComp<PKC>>::exec_autocomp(c, &lphrase).await?;
-            let _x = rediserde::set_ex(pool, &key, &hits, T::seconds_expiry()).await?;
-            Ok(hits)
+        None => { recache::<PKC, T>(pool, c, phrase).await }
+    }
+}
+
+
+/// The AutoComp trait queries postgres for matching WhoWhatWhere<PKC> structs.  This is typically slowest for the first few
+/// characters (i.e. very short strings) because they will generate the most matches. It is helpful to therefore
+/// defind a method that will iterate over many short strings and pre-query the database and cache the results to Redis. 
+pub async fn warm_the_cache<PKC: Serialize+DeserializeOwned+std::marker::Send, T: CachedAutoComp<PKC>>(pool: &RedisPool, c: &ClientNoTLS) -> Result<(), GenericError> {
+    let chars1 =  "abcdefghijklmnopqrstuvwxyz0123456789";
+    let chars23 = "abcdefghijklmnopqrstuvwxyz_.!?-0123456789 "; // note the space at the end
+    for c1 in chars1.chars() {
+        let mut phrase = c1.to_string();
+        let _hits = recache::<PKC, T>(pool, c, &phrase).await?;
+        for c2 in chars23.chars() {
+            phrase.push(c2);
+            let _hits = recache::<PKC, T>(pool, c, &phrase).await?;
+            for c3 in chars23.chars() {
+                phrase.push(c3);
+                let _hits = recache::<PKC, T>(pool, c, &phrase).await?;
+            }
         }
     }
+    Ok(())
 }
 
 
