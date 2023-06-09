@@ -19,13 +19,15 @@ use crate::{connect::ClientNoTLS, fulltext::ts_expression};
 /// be it an integer, a string, or a tuple etc.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct WhoWhatWhere<PK: Serialize+std::marker::Send > {
-    pub data_type: &'static str,
+    pub data_type: String,
     pub pk: PK,
     pub name: String
 }
 
 
-/// The autocomp trait maks it easy to return a vec of WhoWhatWhere referencing a given type
+/// The autocomp trait maks it easy to return a vec of WhoWhatWhere referencing a given type.
+/// See also redis:: CachedAutoComp for a similar trait that will first look for a cached autocomplete
+/// value in Redis before going to Postgres. 
 /// # Examples
 /// ```
 /// // Consider this SQL schema:

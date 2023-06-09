@@ -9,22 +9,22 @@
 //! REDIS_PW: The authentication password for Redis
 //! IS_TSL: If set to anything, rediss will be used instead of redis
 
-use std::{env, time::Duration};
-use serde::{Serialize, Deserialize, de::DeserializeOwned};
+use std::env;
+use serde::{Serialize, de::DeserializeOwned};
 use async_trait::async_trait;
 use mobc::Pool;
 use mobc_redis::{RedisConnectionManager, redis::{AsyncCommands, RedisResult, Client, aio::Connection}};
-use tokio_postgres::{row::Row, types::{ToSql}};
-
+use tokio_postgres::{row::Row, types::ToSql};
 use crate::err::{GenericError, DiskError};
 use crate::connect::ClientNoTLS;
+use crate::autocomplete::{AutoComp, WhoWhatWhere, exec_autocomp};
 
 // constants for mobc redis connection pools
 // see https://blog.logrocket.com/using-redis-in-a-rust-web-service/
 const CACHE_POOL_MAX_OPEN: u64 = 16;
-const CACHE_POOL_MAX_IDLE: u64 = 8;
-const CACHE_POOL_TIMEOUT_SECONDS: u64 = 20;
-const CACHE_POOL_EXPIRE_SECONDS: u64 = 60;
+const _CACHE_POOL_MAX_IDLE: u64 = 8;
+const _CACHE_POOL_TIMEOUT_SECONDS: u64 = 20;
+const _CACHE_POOL_EXPIRE_SECONDS: u64 = 60;
 const OBSCURE_TEST_KEY: &'static str = "_OBSCURE_TEST_KEY_0";
 
 pub type RedisConn = Connection<RedisConnectionManager>;
@@ -87,6 +87,37 @@ pub async fn cached_or_cache<T: Cacheable>(c: &ClientNoTLS, pool: &RedisPool, pa
         }
     }
 }
+
+
+/// The autocomplete introduces the AutoComp trait, which allows a vector of <WhoWhatWhere<PK>>
+/// to be returned by querying Postgres for a given phrase.   
+/// This CachedAutoComp trait is related (in fact, it requires for AutoComp to also be implemented):
+/// By defining a dtype() classmethod (which is needed so different WhoWhatWhere types don't share the same
+/// key in redis) and a seconds to expiry, the cached_autocomp function will first look in redis 
+/// for a cached value. If one cannot be found, the (non-cached) AutoComp trait is used to find 
+/// resulting hits, which are then cached and returned. 
+pub trait CachedAutoComp<PKC: Serialize+DeserializeOwned+std::marker::Send>: AutoComp<PKC> {
+    fn dtype() -> &'static str;
+    fn seconds_expiry() -> usize;
+}
+
+
+/// the cached_autocomp function will first look in Redis for cached autocomplete results before looking in Postgres.  
+/// See more detail under the CachedAutoComp trait. 
+pub async fn cached_autocomp<PKC: Serialize+DeserializeOwned+std::marker::Send, T: CachedAutoComp<PKC>+DeserializeOwned>(pool: &RedisPool, c: &ClientNoTLS, phrase: &str) -> Result<Vec<WhoWhatWhere<PKC>>, GenericError> {
+    let lphrase = phrase.to_lowercase(); // Postgres tsquery is case insensitive by Redis keys are not
+    let key = format!("autocomp_{}_{}", T::dtype(), &lphrase );
+    let cached: Option<Vec<WhoWhatWhere<PKC>>> = rediserde::get(pool, &key).await?;
+    match cached {
+        Some(hits) => Ok(hits),
+        None => {
+            let hits: Vec<WhoWhatWhere<PKC>> = <T as AutoComp<PKC>>::exec_autocomp(c, &lphrase).await?;
+            let _x = rediserde::set_ex(pool, &key, &hits, T::seconds_expiry()).await?;
+            Ok(hits)
+        }
+    }
+}
+
 
 /// Return a new connection pool from the mobc_redis::Client struct
 pub async fn new_pool_from_client(client: Client) -> Result<RedisPool, GenericError> {
