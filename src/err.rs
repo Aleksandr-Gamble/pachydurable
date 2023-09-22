@@ -1,5 +1,5 @@
 use std::{error::Error, fmt};
-use serde::{Serialize, Deserialize};
+
 use tokio_postgres::Error as TokioPgError;
 
 pub type GenericError = Box<dyn std::error::Error + Send + Sync>;

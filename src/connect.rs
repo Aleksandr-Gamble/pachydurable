@@ -1,4 +1,4 @@
-use std::{env, vec::Vec, error::Error, fmt, marker::Sync};
+use std::{env, vec::Vec, marker::Sync};
 pub use tokio_postgres::{Config, NoTls, row::Row, Error as ErrorTKPG};
 use tokio_postgres::{types::ToSql}; // can't pub use ToSql as it is private
 pub use tokio_postgres::GenericClient;

@@ -15,9 +15,9 @@ use async_trait::async_trait;
 use mobc::Pool;
 use mobc_redis::{RedisConnectionManager, redis::{AsyncCommands, RedisResult, Client, aio::Connection}};
 use tokio_postgres::{row::Row, types::ToSql};
-use crate::err::{GenericError, DiskError};
+use crate::err::{GenericError};
 use crate::connect::ClientNoTLS;
-use crate::autocomplete::{AutoComp, WhoWhatWhere, exec_autocomp};
+use crate::autocomplete::{AutoComp, WhoWhatWhere};
 
 // constants for mobc redis connection pools
 // see https://blog.logrocket.com/using-redis-in-a-rust-web-service/
