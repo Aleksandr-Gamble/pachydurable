@@ -47,9 +47,10 @@ pub trait Cacheable: Serialize + DeserializeOwned {
 
     /// This method generates a key showing where to cache an instance of a struct in Redis
     fn redis_key(params:&[&(dyn ToSql + Sync)]) -> String {
-        let mut key = Self::key_prefix().to_string();
+        let mut key = format!("cacheable_{}", Self::key_prefix());
         for param in params {
-            key.push_str(&format!("_{:?}", param));
+            let delta = format!("_{:?}", param).replace("\"","");
+            key.push_str(&delta);
         }
         key
     }
