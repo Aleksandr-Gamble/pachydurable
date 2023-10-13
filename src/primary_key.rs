@@ -8,6 +8,7 @@ use crate::{err::{GenericError, MissingRowError}, connect::ClientNoTLS};
 
 
 /// the get by PK trait makes it easy to return an instance of a struct given its primary key
+/// See also the redis::Cacheable trait, which is more generic and allows caching 
 pub trait GetByPK {
     fn query_get_by_pk() -> &'static str;       // a query to return the struct
     fn rowfunc_get_by_pk(row: &Row) -> Self;    // returns the struct
