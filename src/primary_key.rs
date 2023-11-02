@@ -2,9 +2,7 @@
 use std::marker::Sync;
 // crates.io
 use tokio_postgres::{row::Row, types::{ToSql}};
-use crate::{err::{GenericError, MissingRowError}, connect::ClientNoTLS};
-
-
+use crate::{err::{PachyDarn, MissingRowError}, connect::ClientNoTLS};
 
 
 /// the get by PK trait makes it easy to return an instance of a struct given its primary key
@@ -14,7 +12,7 @@ pub trait GetByPK {
     fn rowfunc_get_by_pk(row: &Row) -> Self;    // returns the struct
 }
 
-pub async fn get_by_pk<T: GetByPK>(client: &ClientNoTLS, params: &[&(dyn ToSql+Sync)]) -> Result<T, GenericError> {
+pub async fn get_by_pk<T: GetByPK>(client: &ClientNoTLS, params: &[&(dyn ToSql+Sync)]) -> Result<T, PachyDarn> {
     let query = T::query_get_by_pk();
     let rows = client.query(query, params).await?;
     let row = rows.get(0).ok_or(MissingRowError{message:"could not get by PK".to_string()})?;

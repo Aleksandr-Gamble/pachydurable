@@ -7,7 +7,7 @@
 use std::vec::Vec;
 // crates.io
 use tokio_postgres::row::Row;
-use crate::{err::GenericError, connect::ClientNoTLS};
+use crate::{err::PachyDarn, connect::ClientNoTLS};
 
 
 
@@ -59,7 +59,7 @@ pub trait FullText {
 
 
 /// call this function with an explicit type hint for Vec<T>, where T implements the FullText trait
-pub async fn exec_fulltext<T: FullText>(client: &ClientNoTLS, phrase: &str) -> Result<Vec<T>, GenericError> {
+pub async fn exec_fulltext<T: FullText>(client: &ClientNoTLS, phrase: &str) -> Result<Vec<T>, PachyDarn> {
     let query = T::query_fulltext();
     let ts_expr = ts_expression(phrase);
     let mut hits = Vec::new();

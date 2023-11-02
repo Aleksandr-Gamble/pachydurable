@@ -14,6 +14,7 @@ path = "examples/api.rs"
 [dependencies]
 async-trait = "0.1.66"
 hyper = { version = "0.14.23", features = ["full"] }
+hyperactive = { path = "../hyperactive" }
 mobc = "0.8.1"
 mobc-postgres = "0.8.0"
 mobc-redis = "0.8.0"
@@ -24,5 +25,4 @@ tokio-postgres = { version="0.7.7",  features = ["with-chrono-0_4"]}
 
 [dev-dependencies]
 tokio = { version = "1.22.0", features = ["full"] }
-hyperactive = { path = "../hyperactive" }
 rand = "0.8.5"

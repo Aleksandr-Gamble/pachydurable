@@ -8,7 +8,7 @@ use std::vec::Vec;
 use async_trait::async_trait;
 use serde::{Serialize, Deserialize};
 use tokio_postgres::row::Row;
-use crate::err::GenericError;
+use crate::err::PachyDarn;
 use crate::{connect::ClientNoTLS, fulltext::ts_expression};
 
 
@@ -72,7 +72,7 @@ pub struct WhoWhatWhere<PK: Serialize+std::marker::Send > {
 pub trait AutoComp<PK: Serialize+std::marker::Send >: std::marker::Send {
     fn query_autocomp() -> &'static str;
     fn rowfunc_autocomp(row: &Row) -> WhoWhatWhere<PK>;
-    async fn exec_autocomp(client: &ClientNoTLS, phrase: &str) -> Result<Vec<WhoWhatWhere<PK>>, GenericError> {
+    async fn exec_autocomp(client: &ClientNoTLS, phrase: &str) -> Result<Vec<WhoWhatWhere<PK>>, PachyDarn> {
         let query = Self::query_autocomp();
         let ts_expr = ts_expression(phrase);
         let mut hits = Vec::new();
@@ -85,7 +85,7 @@ pub trait AutoComp<PK: Serialize+std::marker::Send >: std::marker::Send {
     }
 }
 
-pub async fn exec_autocomp<PK: Serialize+std::marker::Send , T: AutoComp<PK>>(client: &ClientNoTLS, phrase: &str) -> Result<Vec<WhoWhatWhere<PK>>, GenericError> {
+pub async fn exec_autocomp<PK: Serialize+std::marker::Send , T: AutoComp<PK>>(client: &ClientNoTLS, phrase: &str) -> Result<Vec<WhoWhatWhere<PK>>, PachyDarn> {
     let query = T::query_autocomp();
     let ts_expr = ts_expression(phrase);
     let mut hits = Vec::new();

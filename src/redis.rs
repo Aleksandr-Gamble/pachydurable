@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use mobc::Pool;
 use mobc_redis::{RedisConnectionManager, redis::{AsyncCommands, RedisResult, Client, aio::Connection}};
 use tokio_postgres::{row::Row, types::ToSql};
-use crate::err::{GenericError};
+use crate::err::{PachyDarn};
 use crate::connect::ClientNoTLS;
 use crate::autocomplete::{AutoComp, WhoWhatWhere};
 
@@ -69,7 +69,7 @@ pub trait Cacheable: Serialize + DeserializeOwned {
 /// If not, it will next check in postgres.
 /// If a value is found, it will be cahced and returned 
 /// If nothing is found in Postgres either, the None variant will be returned
-pub async fn cached_or_cache<T: Cacheable>(c: &ClientNoTLS, pool: &RedisPool, params: &[&(dyn ToSql + Sync)]) -> Result<Option<T>, GenericError> {
+pub async fn cached_or_cache<T: Cacheable>(c: &ClientNoTLS, pool: &RedisPool, params: &[&(dyn ToSql + Sync)]) -> Result<Option<T>, PachyDarn> {
     let key = T::redis_key(params);
     let cached: Option<T> = rediserde::get(pool, &key).await?;
     match cached {
@@ -131,7 +131,7 @@ fn autocomp_key<PKC: Serialize+DeserializeOwned+std::marker::Send, T: CachedAuto
 
 /// as the name implies, recache will redo the postgres query for autocomplete results for a given phrase and cache the value,
 /// overwiting any previous result. 
-pub async fn recache<PKC: Serialize+DeserializeOwned+std::marker::Send, T: CachedAutoComp<PKC>>(pool: &RedisPool, c: &ClientNoTLS, phrase: &str) -> Result<Vec<WhoWhatWhere<PKC>>, GenericError> {
+pub async fn recache<PKC: Serialize+DeserializeOwned+std::marker::Send, T: CachedAutoComp<PKC>>(pool: &RedisPool, c: &ClientNoTLS, phrase: &str) -> Result<Vec<WhoWhatWhere<PKC>>, PachyDarn> {
     let key = autocomp_key::<PKC, T>(&phrase);
     let hits: Vec<WhoWhatWhere<PKC>> = <T as AutoComp<PKC>>::exec_autocomp(c, &phrase).await?;
     let _x = rediserde::set_ex(pool, &key, &hits, T::seconds_expiry()).await?;
@@ -141,7 +141,7 @@ pub async fn recache<PKC: Serialize+DeserializeOwned+std::marker::Send, T: Cache
 
 /// the cached_autocomp function will first look in Redis for cached autocomplete results before looking in Postgres.  
 /// See more detail under the CachedAutoComp trait. 
-pub async fn cached_autocomp<PKC: Serialize+DeserializeOwned+std::marker::Send, T: CachedAutoComp<PKC>>(pool: &RedisPool, c: &ClientNoTLS, phrase: &str) -> Result<Vec<WhoWhatWhere<PKC>>, GenericError> {
+pub async fn cached_autocomp<PKC: Serialize+DeserializeOwned+std::marker::Send, T: CachedAutoComp<PKC>>(pool: &RedisPool, c: &ClientNoTLS, phrase: &str) -> Result<Vec<WhoWhatWhere<PKC>>, PachyDarn> {
     let key = autocomp_key::<PKC, T>(phrase);
     let cached: Option<Vec<WhoWhatWhere<PKC>>> = rediserde::get(pool, &key).await?;
     match cached {
@@ -154,7 +154,7 @@ pub async fn cached_autocomp<PKC: Serialize+DeserializeOwned+std::marker::Send, 
 /// The AutoComp trait queries postgres for matching WhoWhatWhere<PKC> structs.  This is typically slowest for the first few
 /// characters (i.e. very short strings) because they will generate the most matches. It is helpful to therefore
 /// defind a method that will iterate over many short strings and pre-query the database and cache the results to Redis. 
-pub async fn warm_the_cache<PKC: Serialize+DeserializeOwned+std::marker::Send, T: CachedAutoComp<PKC>>(pool: &RedisPool, c: &ClientNoTLS) -> Result<(), GenericError> {
+pub async fn warm_the_cache<PKC: Serialize+DeserializeOwned+std::marker::Send, T: CachedAutoComp<PKC>>(pool: &RedisPool, c: &ClientNoTLS) -> Result<(), PachyDarn> {
     let chars1 =  "abcdefghijklmnopqrstuvwxyz0123456789";
     let chars23 = "abcdefghijklmnopqrstuvwxyz_.!?-0123456789 "; // note the space at the end
     for c1 in chars1.chars() {
@@ -182,7 +182,7 @@ pub async fn warm_the_cache<PKC: Serialize+DeserializeOwned+std::marker::Send, T
 
 
 /// Return a new connection pool from the mobc_redis::Client struct
-pub async fn new_pool_from_client(client: Client) -> Result<RedisPool, GenericError> {
+pub async fn new_pool_from_client(client: Client) -> Result<RedisPool, PachyDarn> {
     let manager = RedisConnectionManager::new(client);
     let pool = Pool::builder()
         //.get_timeout(Some(Duration::from_secs(CACHE_POOL_TIMEOUT_SECONDS)))
@@ -198,7 +198,7 @@ pub async fn new_pool_from_client(client: Client) -> Result<RedisPool, GenericEr
 }
 
 /// Create a new pool from a client generated with these environment variables:
-pub async fn new_pool_from_env() -> Result<RedisPool, GenericError> {
+pub async fn new_pool_from_env() -> Result<RedisPool, PachyDarn> {
     let client = new_client_from_env()?;
     new_pool_from_client(client).await
 }
@@ -238,13 +238,13 @@ pub fn new_client_from_env() -> RedisResult<Client>  {
 pub mod rediserde {
     use super::{RedisPool};
     use mobc_redis::redis::AsyncCommands;
-    use crate::err::GenericError;
+    use crate::err::PachyDarn;
     use serde::{Serialize, de::DeserializeOwned};
     use serde_json;
 
 
     /// Delete a key 
-    pub async fn del(pool: &RedisPool, key: &str) -> Result<(), GenericError> {
+    pub async fn del(pool: &RedisPool, key: &str) -> Result<(), PachyDarn> {
         let mut rconn = pool.get().await?;
         let _ : () = rconn.del(key).await?;
         Ok(())
@@ -253,7 +253,7 @@ pub mod rediserde {
     /// For a struct that can be deserialized,
     /// This helpful method gets a connection, gets the value stored at the key,
     /// deserializes it, and returns the desired struct
-    pub async fn get<T: DeserializeOwned>(pool: &RedisPool, key: &str) -> Result<Option<T>, GenericError> {
+    pub async fn get<T: DeserializeOwned>(pool: &RedisPool, key: &str) -> Result<Option<T>, PachyDarn> {
         let mut rconn = pool.get().await?;
         let jz: String = match rconn.get(key).await {
             Ok(val) => val,
@@ -271,7 +271,7 @@ pub mod rediserde {
     /// For a struct that can be serialized,
     /// This helpful method gets a connection, gets teh value stored at the key,
     /// deserializes it, and returns the desired struct 
-    pub async fn set<T: Serialize>(pool: &RedisPool, key: &str, value: &T) -> Result<(), GenericError> {
+    pub async fn set<T: Serialize>(pool: &RedisPool, key: &str, value: &T) -> Result<(), PachyDarn> {
         let mut rconn = pool.get().await?;
         let jz: String = serde_json::to_string(value)?;
         let _ : () = rconn.set(key, jz).await?;
@@ -279,7 +279,7 @@ pub mod rediserde {
     }
 
     /// This is like set but with an expiry 
-    pub async fn set_ex<T: Serialize>(pool: &RedisPool, key: &str, value: &T, seconds_expiry: usize) -> Result<(), GenericError> {
+    pub async fn set_ex<T: Serialize>(pool: &RedisPool, key: &str, value: &T, seconds_expiry: usize) -> Result<(), PachyDarn> {
         let mut rconn = pool.get().await?;
         let jz: String = serde_json::to_string(value)?;
         let _ : () = rconn.set_ex(key, jz, seconds_expiry).await?;
@@ -287,7 +287,7 @@ pub mod rediserde {
     }
 
     /// add a struct to a set
-    pub async fn sadd<T: Serialize>(pool: &RedisPool, key: &str, value: &T) -> Result<(), GenericError> {
+    pub async fn sadd<T: Serialize>(pool: &RedisPool, key: &str, value: &T) -> Result<(), PachyDarn> {
         let mut rconn = pool.get().await?;
         let jz: String = serde_json::to_string(value)?;
         let _ : () = rconn.sadd(key, jz).await?;
@@ -295,13 +295,13 @@ pub mod rediserde {
     }
 
     /// add a string to a set
-    pub async fn sadd_str(pool: &RedisPool, key: &str, val: &str) -> Result<(), GenericError> {
+    pub async fn sadd_str(pool: &RedisPool, key: &str, val: &str) -> Result<(), PachyDarn> {
         let mut rconn = pool.get().await?;
         let _ : () = rconn.sadd(key, val).await?;
         Ok(())
     }
 
-    pub async fn spop_str(pool: &RedisPool, key: &str) -> Result<Option<String>, GenericError> {
+    pub async fn spop_str(pool: &RedisPool, key: &str) -> Result<Option<String>, PachyDarn> {
         // This pool.get() hangs sometimes with the error "Timed out in mobc". What to do?  
         let mut rconn = pool.get().await?;
         let jz: String = match rconn.spop(key).await {
@@ -317,7 +317,7 @@ pub mod rediserde {
     }
 
 
-    pub async fn spop<T: DeserializeOwned>(pool: &RedisPool, key: &str) -> Result<Option<T>, GenericError> {
+    pub async fn spop<T: DeserializeOwned>(pool: &RedisPool, key: &str) -> Result<Option<T>, PachyDarn> {
         let jz = match spop_str(pool, key).await? {
             Some(val) => val,
             None => return Ok(None),
@@ -326,7 +326,7 @@ pub mod rediserde {
         Ok(Some(t))
     }
 
-    pub async fn scard(pool: &RedisPool, key: &str) -> Result<usize, GenericError> {
+    pub async fn scard(pool: &RedisPool, key: &str) -> Result<usize, PachyDarn> {
         let mut rconn = pool.get().await?;
         let cardinality = rconn.scard(key).await?;
         Ok(cardinality)

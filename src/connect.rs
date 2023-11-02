@@ -4,7 +4,7 @@ use tokio_postgres::{types::ToSql}; // can't pub use ToSql as it is private
 pub use tokio_postgres::GenericClient;
 pub use mobc::{self, Pool};
 pub use mobc_postgres::PgConnectionManager;
-use crate::err::{GenericError, MissingRowError};
+use crate::err::{PachyDarn, MissingRowError};
 
 
 /// The ConnPoolNoTLS a common connector used for various applications
@@ -16,7 +16,7 @@ pub type ClientNoTLS = mobc::Connection<PgConnectionManager<NoTls>>;
 
 
 /// return an option<T>
-pub async fn get_opt<'a, T>(client: &'a ClientNoTLS, query: &'static str, rowfunc: &'a dyn Fn(&Row) -> T, params: &'a [&'a (dyn ToSql + Sync)]) -> Result<Option<T>, GenericError> {
+pub async fn get_opt<'a, T>(client: &'a ClientNoTLS, query: &'static str, rowfunc: &'a dyn Fn(&Row) -> T, params: &'a [&'a (dyn ToSql + Sync)]) -> Result<Option<T>, PachyDarn> {
     let rows = client.query(query, params).await?;
     match rows.get(0) {
         None => Ok(None),
@@ -25,7 +25,7 @@ pub async fn get_opt<'a, T>(client: &'a ClientNoTLS, query: &'static str, rowfun
 }
 
 /// return T
-pub async fn get_one<'a, T>(client: &'a ClientNoTLS, query: &'static str, rowfunc: &'a dyn Fn(&Row) -> T, params:&'a [&'a (dyn ToSql + Sync)]) -> Result<T, GenericError> {
+pub async fn get_one<'a, T>(client: &'a ClientNoTLS, query: &'static str, rowfunc: &'a dyn Fn(&Row) -> T, params:&'a [&'a (dyn ToSql + Sync)]) -> Result<T, PachyDarn> {
     let t: T = match get_opt(client, query, rowfunc, params).await? {
         Some(t) => t,
         None => return Err(MissingRowError{message: format!("No row found for query \"{}\"", query)}.into())
@@ -35,7 +35,7 @@ pub async fn get_one<'a, T>(client: &'a ClientNoTLS, query: &'static str, rowfun
 
 
 /// This cool function takes a references to a pool and a query and returns a vec of results
-pub async fn get_vec<'a, T>(client: &'a ClientNoTLS, query: &'static str, rowfunc: &'a dyn Fn(&Row) -> T, params:&'a[&'a(dyn ToSql + Sync)]) -> Result<Vec<T>, GenericError> {
+pub async fn get_vec<'a, T>(client: &'a ClientNoTLS, query: &'static str, rowfunc: &'a dyn Fn(&Row) -> T, params:&'a[&'a(dyn ToSql + Sync)]) -> Result<Vec<T>, PachyDarn> {
     let rows = client.query(query, params).await?;
     let mut vt = Vec::new();
     for row in rows {
@@ -47,13 +47,13 @@ pub async fn get_vec<'a, T>(client: &'a ClientNoTLS, query: &'static str, rowfun
 
 
 /// create a new Pool from environment variables
-pub async fn pool_no_tls_from_env() -> Result<ConnPoolNoTLS, GenericError> {
+pub async fn pool_no_tls_from_env() -> Result<ConnPoolNoTLS, PachyDarn> {
     let config = SimpleConfig::new_from_env();
     pool_no_tls_from_config(&config).await
 }
 
 /// create a new Pool from a SimpleConfig
-pub async fn pool_no_tls_from_config(config: &SimpleConfig) -> Result<ConnPoolNoTLS, GenericError> {
+pub async fn pool_no_tls_from_config(config: &SimpleConfig) -> Result<ConnPoolNoTLS, PachyDarn> {
     let mut pg_config = Config::new();
     pg_config.user(&config.user);
     pg_config.password(&config.password);
