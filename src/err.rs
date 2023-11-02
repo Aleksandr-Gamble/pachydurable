@@ -1,6 +1,7 @@
 use std::{error::Error, fmt};
 
 use tokio_postgres::Error as TokioPgError;
+use hyper;
 use mobc;
 use redis;
 use serde_json;
@@ -40,6 +41,13 @@ impl fmt::Display for PachyDarn {
 impl From<ServerError> for PachyDarn {
     fn from(err: ServerError) -> Self {
         PachyDarn::Hyperactive(err)
+    }
+}
+
+impl From<hyper::Error> for PachyDarn {
+    fn from(err: hyper::Error) -> Self {
+        let srverr = ServerError::from(err);
+        PachyDarn::Hyperactive(srverr)
     }
 }
 
