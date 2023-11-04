@@ -1,11 +1,11 @@
 use std::{error::Error, fmt};
 
-use tokio_postgres::Error as TokioPgError;
+
 use hyper;
 use mobc;
 use redis;
 use serde_json;
-use hyperactive::server::ServerError;
+use hyperactive::server::{self, ServerError};
 pub type GenericError = Box<dyn std::error::Error + Send + Sync>;
 
 
@@ -44,12 +44,35 @@ impl From<ServerError> for PachyDarn {
     }
 }
 
+impl From<server::ArgError> for PachyDarn {
+    fn from(err: server::ArgError) -> Self {
+        let srverr = server::ServerError::from(err);
+        PachyDarn::from(srverr)
+    }
+}
+
+
+impl From<server::MalformedArg> for PachyDarn {
+    fn from(err: server::MalformedArg) -> Self {
+        let srverr = ServerError::from(err);
+        PachyDarn::Hyperactive(srverr)
+    }
+}
+
 impl From<hyper::Error> for PachyDarn {
     fn from(err: hyper::Error) -> Self {
         let srverr = ServerError::from(err);
         PachyDarn::Hyperactive(srverr)
     }
 }
+
+impl From<hyper::http::Error> for PachyDarn {
+    fn from(err: hyper::http::Error) -> Self {
+        let srverr= ServerError::from(err);
+        PachyDarn::Hyperactive(srverr)
+    }
+}
+
 
 impl From<redis::RedisError> for PachyDarn {
     fn from(err: redis::RedisError) -> Self {
@@ -124,57 +147,3 @@ impl MissingRowError {
     }
 }
 
-
-/// The DiskError indicates something went wrong reading or writing to disk 
-#[derive(Debug)]
-pub enum DiskError {
-    PG(TokioPgError),
-    MissingRow,
-}
-
-
-impl Error for DiskError{}
-
-impl fmt::Display for DiskError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DiskError: {:?}", &self)
-    }
-}
-
-impl From<TokioPgError> for DiskError {
-    fn from(e: TokioPgError) -> Self {
-        DiskError::PG(e)
-    }
-}
-
-impl DiskError {
-    pub fn missing_row() -> Self {
-        DiskError::MissingRow
-    }
-}
-
-
-/*
-#[derive(Debug)]
-pub struct PachyErr {
-    // A very generic error. This is a bit of an antipattern,
-    // but it is easier than creating a new error types for a hundred misc things
-    pub message: String,
-}
-
-impl Error for PachyErr {}
-
-impl fmt::Display for PachyErr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "PachyErr: {}", self.message)
-    }
-}
-
-impl PachyErr {
-    pub fn from_str(message: &str) -> Self {
-        PachyErr{
-            message: message.to_string()
-        }
-    }
-}
-*/
