@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use mobc::Pool;
 use mobc_redis::{RedisConnectionManager, redis::{AsyncCommands, RedisResult, Client, aio::Connection}};
 use tokio_postgres::{row::Row, types::ToSql};
-use crate::err::{PachyDarn};
+use crate::err::{PachyDarn, MissingRowError};
 use crate::connect::ClientNoTLS;
 use crate::autocomplete::{AutoComp, WhoWhatWhere};
 
@@ -86,6 +86,18 @@ pub async fn cached_or_cache<T: Cacheable>(c: &ClientNoTLS, pool: &RedisPool, pa
                 }
             }
         }
+    }
+}
+
+
+/// the cached_or_cache function returns Result<Option<T>, PachyDarn>
+/// The "_f" in cached_or_cache_f indicates that it forces the code to look for the Some variant,
+/// returning the MissingRow variant of a PachyDarn error if it was not found 
+pub async fn cached_or_cache_f<T: Cacheable>(c: &ClientNoTLS, pool: &RedisPool, params: &[&(dyn ToSql + Sync)]) -> Result<T, PachyDarn> {
+    let opt: Option<T> = cached_or_cache(c, pool, params).await?;
+    match opt {
+        Some(val) => Ok(val),
+        None => Err(PachyDarn::from(MissingRowError::from_str("cached_or_cache_f found a None variant"))),
     }
 }
 
