@@ -1,13 +1,14 @@
-use std::{sync::Arc};
+use std::{sync::Arc, fmt, error::Error};
 use serde::Serialize;
 use hyper::server::conn::AddrStream;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
-use hyperactive::{err::GenericError, server::{self, build_response_json, get_query_param}};
+use hyperactive::server::{self, build_response_json, get_query_param, ServerError};
 use tokio_postgres::row::Row;
 use pachydurable::autocomplete::{WhoWhatWhere, AutoComp}; // bring the trait into scope
 use pachydurable::fulltext::FullText; // bring the trait into scope
-use pachydurable::{connect::{ConnPoolNoTLS, ClientNoTLS}};
+use pachydurable::connect::{ConnPoolNoTLS, ClientNoTLS};
+use pachydurable::err::PachyDarn;
 
 static INDEX: &[u8] = b"Hello from Rust -> Tokio -> Hyper -> Pachydurable !";
 static NOTFOUND: &[u8] = b"Not Found";
@@ -30,7 +31,7 @@ impl AutoComp<i32> for Animal {
         LIMIT 5;"
     }
     fn rowfunc_autocomp(row: &tokio_postgres::Row) -> WhoWhatWhere<i32> {
-        let data_type = "animal";
+        let data_type = "animal".to_string();
         let pk: i32 = row.get(0);
         let name: String = row.get(1);
         WhoWhatWhere{data_type, pk, name}
@@ -68,7 +69,7 @@ impl AutoComp<String> for Food {
         LIMIT 10;"
     }
     fn rowfunc_autocomp(row: &tokio_postgres::Row) -> WhoWhatWhere<String> {
-        let data_type = "food";
+        let data_type = "food".to_string();
         let pk: String = row.get(0);
         let name: String = row.get(0);
         WhoWhatWhere{data_type, pk, name}
@@ -90,65 +91,114 @@ impl FullText for Food {
 }
 
 
+
+#[derive(Debug)]
+enum MyCustomError {
+    Pachy(PachyDarn),
+    Hyper(hyper::Error),
+    HyperHTTP(hyper::http::Error),
+    Hyperactive(ServerError),
+}
+
+impl Error for MyCustomError {}
+
+impl fmt::Display for MyCustomError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl From<PachyDarn> for MyCustomError {
+    fn from(err: PachyDarn) -> Self {
+       MyCustomError::Pachy(err)
+    }
+}
+
+impl From<hyper::Error> for MyCustomError {
+    fn from(err: hyper::Error) -> Self {
+        MyCustomError::Hyper(err)
+    }
+}
+
+impl From<hyper::http::Error> for MyCustomError {
+    fn from(err: hyper::http::Error) -> Self  {
+        MyCustomError::HyperHTTP(err)
+    }
+}
+
+impl From<ServerError> for MyCustomError {
+    fn from(err: ServerError) -> Self {
+        MyCustomError::Hyperactive(err)
+    }
+}
+
+impl From<server::ArgError> for MyCustomError {
+    fn from(err: server::ArgError) -> Self {
+        let srverr = server::ServerError::from(err);
+        MyCustomError::from(srverr)
+    }
+}
+
+
 // this function matches the data_type=, q= params from a request to return a vector of WhoWhatWhere<PK> structs
-async fn autocomp_switcher(req: &Request<Body>, client: &ClientNoTLS) -> Result<Response<Body>, GenericError> {
-    let data_type: String = get_query_param(&req, "data_type").unwrap();
-    let phrase: String = get_query_param(&req, "q").unwrap();
+async fn autocomp_switcher(req: &Request<Body>, client: &ClientNoTLS) -> Result<Response<Body>, MyCustomError> {
+    let data_type: String = get_query_param(&req, "data_type")?;
+    let phrase: String = get_query_param(&req, "q")?;
     match data_type.as_ref() {
         "animal"  => {
             let hits = Animal::exec_autocomp(client, &phrase).await?;
-			build_response_json(&hits)
+			Ok(build_response_json(&hits)?)
         },
         "food"  => {
             let hits = Food::exec_autocomp(client, &phrase).await?;
-			build_response_json(&hits)
+			Ok(build_response_json(&hits)?)
         },
         _ => {
             Ok(Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .body(format!("Unknown data type {}", &data_type).into())
-                .unwrap())
+                ?)
         },
     }
 }
 
 
 // this function matches the data_type=, q= params from a request to return a vector of <T> fulltext hits
-async fn fulltext_switcher(req: &Request<Body>, client: &ClientNoTLS) -> Result<Response<Body>, GenericError> {
-    let data_type: String = get_query_param(&req, "data_type").unwrap();
-    let phrase: String = get_query_param(&req, "q").unwrap();
+async fn fulltext_switcher(req: &Request<Body>, client: &ClientNoTLS) -> Result<Response<Body>, MyCustomError> {
+    let data_type: String = get_query_param(&req, "data_type")?;
+    let phrase: String = get_query_param(&req, "q")?;
     match data_type.as_ref() {
         "animal"  => {
             let hits: Vec<Animal> = pachydurable::fulltext::exec_fulltext(client, &phrase).await?;
-			build_response_json(&hits)
+			Ok(build_response_json(&hits)?)
         },
         "food"  => {
             let hits: Vec<Food> = pachydurable::fulltext::exec_fulltext(client, &phrase).await?;
-			build_response_json(&hits)
+            Ok(build_response_json(&hits)?)
         },
         _ => {
             Ok(Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .body(format!("Unknown data type {}", &data_type).into())
-                .unwrap())
+                ?)
         },
     }
 }
-async fn request_router(req: Request<Body>, arc_pool: Arc<ConnPoolNoTLS>, _ip_address: String) -> Result<Response<Body>, GenericError> {
+async fn request_router(req: Request<Body>, arc_pool: Arc<ConnPoolNoTLS>, _ip_address: String) -> Result<Response<Body>, MyCustomError> {
     /* Notice a pattern in the signature for this function:
     All the arguments consume them, but then the routing consumes a reference to the consumed arguments */
     let _hdrs = server::get_common_headers(&req);
-    let client = arc_pool.get().await?;
+    let client = arc_pool.get().await.unwrap();
     match (req.method(), req.uri().path()) {
-        (&Method::OPTIONS, _) => server::preflight_cors(req).await,
+        (&Method::OPTIONS, _) => Ok(server::preflight_cors(req).await?),
         (&Method::GET,  "/") => Ok(Response::new(INDEX.into())),
-        (&Method::GET, "/autocomp") => autocomp_switcher(&req, &client).await,
-        (&Method::GET, "/fulltext") => fulltext_switcher(&req, &client).await,
+        (&Method::GET, "/autocomp") => Ok(autocomp_switcher(&req, &client).await?),
+        (&Method::GET, "/fulltext") => Ok(fulltext_switcher(&req, &client).await?),
         _ => { // Return 404 not found response.
             Ok(Response::builder()
                 .status(StatusCode::NOT_FOUND)
                 .body(NOTFOUND.into())
-                .unwrap())
+                ?)
         }
     }
 }
@@ -156,10 +206,10 @@ async fn request_router(req: Request<Body>, arc_pool: Arc<ConnPoolNoTLS>, _ip_ad
 
 
 #[tokio::main]
-async fn main() -> Result<(), GenericError> {
+async fn main() -> Result<(), MyCustomError> {
 
     // Initialize stuff that needs unwrapped. If you're gonna fail, fail early
-    let arc_pool = Arc::new(pachydurable::connect::pool_no_tls_from_env().await.unwrap());
+    let arc_pool = Arc::new(pachydurable::connect::pool_no_tls_from_env().await?);
     
     let new_service = make_service_fn(move |conn: &AddrStream| {
         // the request_router consumes all its arguments so it can live as long as needed
@@ -168,7 +218,7 @@ async fn main() -> Result<(), GenericError> {
         let remote_addr = conn.remote_addr();
         let ip_address = remote_addr.ip().to_string();
         async {
-            Ok::<_, GenericError>(service_fn(move |req| {
+            Ok::<_, MyCustomError>(service_fn(move |req| {
                 // Clone again to ensure everything you need outlives this closure.
                 request_router(req, arc_pool.to_owned(), ip_address.to_owned())
             }))
