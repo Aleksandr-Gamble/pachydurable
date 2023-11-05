@@ -28,6 +28,7 @@ pub enum PachyDarn {
     Redis(redis::RedisError),
     SerdeJSON(serde_json::Error),
     Hyperactive(ServerError),
+    Other(String),
 }
 
 impl Error for PachyDarn {}
@@ -35,6 +36,18 @@ impl Error for PachyDarn {}
 impl fmt::Display for PachyDarn {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self)
+    }
+}
+
+impl PachyDarn {
+    /// Create an 'other' variant of this error containing a string 
+    pub fn other(msg: &str) -> Self {
+        PachyDarn::Other(msg.to_string())
+    }
+
+    /// Create an 'other' variant of this error from any type implementing Debug 
+    pub fn other_from<T: std::fmt::Debug>(t: &T) -> Self {
+        PachyDarn::Other(format!("{:?}", t))
     }
 }
 
