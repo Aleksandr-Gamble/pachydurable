@@ -313,6 +313,13 @@ pub mod rediserde {
         Ok(())
     }
 
+    /// report if a string is a member of a set 
+    pub async fn sismember_str(pool: &RedisPool, key: &str, val: &str) -> Result<bool, PachyDarn> {
+        let mut rconn = pool.get().await?;
+        let ismember: bool = rconn.sismember(key, val).await?;
+        Ok(ismember)
+    }
+
     pub async fn spop_str(pool: &RedisPool, key: &str) -> Result<Option<String>, PachyDarn> {
         // This pool.get() hangs sometimes with the error "Timed out in mobc". What to do?  
         let mut rconn = pool.get().await?;
