@@ -77,6 +77,18 @@ impl From<mobc::Error<redis::RedisError>> for PachyDarn {
     }
 }
 
+
+impl From<mobc_redis::redis::RedisError> for PachyDarn {
+    fn from(err: mobc_redis::redis::RedisError) -> Self {
+        PachyDarn::MobcRedis(MobcErr::PoolClosed) // TODO wrong error
+    }
+}
+impl From<mobc::Error<mobc_redis::redis::RedisError>> for PachyDarn {
+    fn from(err: mobc::Error<mobc_redis::redis::RedisError>) -> Self {
+        PachyDarn::MobcRedis(MobcErr::PoolClosed) // TODO wrong error 
+    }
+}
+
 impl From<MissingRowError> for PachyDarn {
     fn from(err: MissingRowError) -> Self {
         PachyDarn::MissingRow(err)
