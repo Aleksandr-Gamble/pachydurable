@@ -12,6 +12,7 @@ path = "examples/api.rs"
 
 
 [dependencies]
+async-recursion = "1.0.0"
 async-trait = "0.1.66"
 mobc = "0.8.1"
 mobc-postgres = "0.8.0"

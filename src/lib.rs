@@ -3,6 +3,7 @@
 //! The pachydurable library is intended to make using Postgres in the Rust/tokio/hyper ecosystem more ergonomic. 
 
 pub mod autocomplete;
+pub mod borg;
 pub mod connect;
 pub mod err;
 pub mod fulltext;
