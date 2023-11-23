@@ -8,6 +8,7 @@ pub type GenericError = Box<dyn std::error::Error + Send + Sync>;
 /// This captures non-tokio_postgres error variants from MOBC 
 #[derive(Debug)]
 pub enum MobcErr {
+    Other(String),
     Timeout,
     BadConn,
     PoolClosed,
@@ -80,12 +81,22 @@ impl From<mobc::Error<redis::RedisError>> for PachyDarn {
 
 impl From<mobc_redis::redis::RedisError> for PachyDarn {
     fn from(err: mobc_redis::redis::RedisError) -> Self {
-        PachyDarn::MobcRedis(MobcErr::PoolClosed) // TODO wrong error
+        let msg = format!("{:?}", err);
+        PachyDarn::MobcRedis(MobcErr::Other(msg))
     }
 }
+
+
 impl From<mobc::Error<mobc_redis::redis::RedisError>> for PachyDarn {
     fn from(err: mobc::Error<mobc_redis::redis::RedisError>) -> Self {
-        PachyDarn::MobcRedis(MobcErr::PoolClosed) // TODO wrong error 
+        match err {
+            mobc::Error::Inner(rerror) => PachyDarn::from(rerror),
+            mobc::Error::Timeout => PachyDarn::MobcRedis(MobcErr::Timeout),
+            mobc::Error::BadConn => PachyDarn::MobcRedis(MobcErr::BadConn),
+            mobc::Error::PoolClosed => PachyDarn::MobcRedis(MobcErr::PoolClosed),
+        }
+
+        //PachyDarn::MobcRedis(MobcErr::PoolClosed) // TODO wrong error 
     }
 }
 
