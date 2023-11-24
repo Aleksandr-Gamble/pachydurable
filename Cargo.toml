@@ -16,6 +16,8 @@ async-recursion = "1.0.0"
 async-trait = "0.1.66"
 # The exact version of mobc and mobc-redis you select can lead to a situation where different machines
 # Seem to recognize mobc_redis::error::RedisError as an alias for redis::RedisError, and others do not
+# during one build of a dependency, both redis 0.22 and 0.23 needed to be complied-
+# could this be related? 
 mobc = "0.8.3"
 mobc-postgres = "0.8.0"
 mobc-redis = "0.8.2"
