@@ -205,7 +205,7 @@ pub async fn get_string_id<'a, T: FromSqlOwned>(c: &'a ClientNoTLS, name: &'a st
 #[cfg(test)]
 mod tests {
     use tokio::runtime::Runtime;
-    use pachydurable::{connect::pool_no_tls_from_env, err::PachyDarn, redis};
+    use crate::{connect::pool_no_tls_from_env, err::PachyDarn, redis};
     use super::*;
 }
 
