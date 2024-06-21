@@ -76,7 +76,7 @@ pub trait AutoComp<PK: Serialize+std::marker::Send >: std::marker::Send {
         let query = Self::query_autocomp();
         let ts_expr = ts_expression(phrase);
         let mut hits = Vec::new();
-        let rows = client.query(query,&[&ts_expr]).await?;
+        let rows = client.query(query,&[&ts_expr, &phrase]).await?;
         for row in rows {
             let hit = Self::rowfunc_autocomp(&row);
             hits.push(hit);
@@ -89,7 +89,7 @@ pub async fn exec_autocomp<PK: Serialize+std::marker::Send , T: AutoComp<PK>>(cl
     let query = T::query_autocomp();
     let ts_expr = ts_expression(phrase);
     let mut hits = Vec::new();
-    let rows = client.query(query,&[&ts_expr]).await?;
+    let rows = client.query(query,&[&ts_expr, &phrase]).await?;
     for row in rows {
         let hit = T::rowfunc_autocomp(&row);
         hits.push(hit);
