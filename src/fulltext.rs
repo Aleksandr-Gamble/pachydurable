@@ -7,7 +7,7 @@
 use std::vec::Vec;
 // crates.io
 use tokio_postgres::row::Row;
-use crate::{err::PachyDarn, connect::ClientNoTLS};
+use crate::{err::PachyDarn, connect::ClientNoTLS, utils::print_if_env_eq};
 
 
 
@@ -82,6 +82,7 @@ pub fn ts_expression(phrase: &str) -> String {
         prefixes.push(prefix);
     }
     let ts_expression = prefixes.join(" & ");
+    print_if_env_eq("DEBUG_TSEX", "1", &format!("ts_expression={}", &ts_expression));
     ts_expression
 }
 
