@@ -5,6 +5,7 @@
 
 // standard library
 use std::vec::Vec;
+use regex::Regex;
 // crates.io
 use tokio_postgres::row::Row;
 use crate::{err::PachyDarn, connect::ClientNoTLS, utils::print_if_env_eq};
@@ -73,7 +74,7 @@ pub async fn exec_fulltext<T: FullText>(client: &ClientNoTLS, phrase: &str) -> R
 
 
 /// Convert a phrase to a postgres ts_expression
-pub fn ts_expression(phrase: &str) -> String {
+pub fn _ts_expression_old(phrase: &str) -> String {
     // Given a phrase like "crimson thread", convert it to a TS expression
     let mut prefixes = Vec::new();
     for word in phrase.to_lowercase().split_whitespace() {
@@ -85,4 +86,43 @@ pub fn ts_expression(phrase: &str) -> String {
     print_if_env_eq("DEBUG_TSEX", "1", &format!("ts_expression={}", &ts_expression));
     ts_expression
 }
+
+/// updated ts_expression Mar 2025
+pub fn ts_expression(phrase: &str) -> String {
+    sanitize_tsquery(phrase, true)
+}
+
+/// Function to sanitize strings for use in to_tsvector in postgres.
+/// Set is_autocomp to true to do prefix matching with the last word
+/// from !ChatGPT! - https://chatgpt.com/c/67cfab2a-b7b4-8003-8375-05446249a51a
+pub fn sanitize_tsquery(input: &str, is_autocomp: bool) -> String {
+    // Define regex patterns
+    let special_chars = Regex::new(r"[^a-zA-Z0-9\s&|!]").unwrap();
+    let multiple_spaces = Regex::new(r"\s+").unwrap();
+    let duplicate_operators = Regex::new(r"(&{2,}|!{2,}|\|{2,})").unwrap();
+    let leading_trailing_ops = Regex::new(r"^(&|\||!)|(&|\||!)$").unwrap();
+
+    // Remove special characters except allowed FTS operators (& | !)
+    let cleaned = special_chars.replace_all(input, " ");
+
+    // Normalize spaces
+    let cleaned = multiple_spaces.replace_all(&cleaned, " ").trim().to_string();
+
+    // Replace spaces with AND (`&`)
+    let mut cleaned = cleaned.replace(" ", " & ");
+
+    // Remove duplicate or misplaced operators
+    cleaned = duplicate_operators.replace_all(&cleaned, " ").to_string();
+    cleaned = leading_trailing_ops.replace_all(&cleaned, "").to_string();
+
+    // If autocomplete is enabled, append ':*' to the last word for prefix match
+    if is_autocomp {
+        cleaned.push_str(":*");
+    }
+
+
+    cleaned
+}
+
+
 
