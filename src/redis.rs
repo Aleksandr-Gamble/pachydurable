@@ -249,6 +249,7 @@ pub fn new_client_from_env() -> RedisResult<Client>  {
 
 pub mod rediserde {
     use super::{RedisPool};
+    use async_trait::async_trait;
     use mobc_redis::redis::AsyncCommands;
     use crate::err::PachyDarn;
     use serde::{Serialize, de::DeserializeOwned};
@@ -351,9 +352,169 @@ pub mod rediserde {
         Ok(cardinality)
     }
 
+
+    #[async_trait]
+    /// Implement this trait to use LPUSH/BRPOP for load leveling- see https://gemini.google.com/app/6e3174a7a8de4148
+    pub trait LoadLevelList: Serialize + DeserializeOwned + Send + Sync {
+        /// The Redis key used for the List (LPUSH/BRPOP)
+        fn list_key() -> &'static str;
+    }
+
+    #[async_trait]
+    /// Implement this trait to use XADD/XREAD for load leveling- see https://gemini.google.com/app/6e3174a7a8de4148
+    pub trait LoadLevelX: Serialize + DeserializeOwned + Send + Sync {
+        /// The Redis key used for the Stream (XADD/XREAD)
+        fn stream_key() -> &'static str;
+        
+        /// The field name within the stream entry where the JSON payload is stored
+        fn field_name() -> &'static str { "data" }
+    }
+
+    /// Push a struct onto the head of a list (Writer)
+    pub async fn list_push<T: LoadLevelList>(pool: &RedisPool, value: &T) -> Result<(), PachyDarn> {
+        let mut rconn = pool.get().await?;
+        let jz: String = serde_json::to_string(value)?;
+        let _: () = rconn.lpush(T::list_key(), jz).await?;
+        Ok(())
+    }
+
+    /// Pop a struct from the tail of a list, blocking until available (Reader)
+    /// timeout_seconds: 0 means block indefinitely
+    /// Note that your mobc pool timeout must be higher than this value to avoid the "Timed out in mobc" error 
+    pub async fn list_pop_blocking<T: LoadLevelList>(pool: &RedisPool, timeout_seconds: usize) -> Result<Option<T>, PachyDarn> {
+        let mut rconn = pool.get().await?;
+        // brpop returns Option<(String, String)> -> (key, value)
+        let res: Option<(String, String)> = rconn.brpop(T::list_key(), timeout_seconds).await?;
+        
+        match res {
+            Some((_key, jz)) => {
+                let t: T = serde_json::from_str(&jz)?;
+                Ok(Some(t))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Add a struct to a Redis Stream (Writer)
+    pub async fn stream_add<T: LoadLevelX>(pool: &RedisPool, value: &T) -> Result<(), PachyDarn> {
+        let mut rconn = pool.get().await?;
+        let jz: String = serde_json::to_string(value)?;
+        // "*" tells Redis to generate the ID automatically
+        let _: String = rconn.xadd(T::stream_key(), "*", &[(T::field_name(), jz)]).await?;
+        Ok(())
+    }
+
+    /// Read new entries from a stream starting from a specific ID (Reader)
+    /// If you pass "$" as the ID, Redis will only return entries that arrive after your command was sent.
+    /// If you pass "0" (or "0-0"), Redis will return the oldest entries available in the stream (up to your count limit).
+    /// Redis Stream IDs are composed of (milliseconds_timestamp)-(sequence_number).
+    ///     Use Case: If you successfully processed an entry with ID 1715486732-0, your next call to stream_read should use that ID. Redis will then return the entries immediately following it.
+    pub async fn stream_read<T: LoadLevelX>(pool: &RedisPool, id: &str) -> Result<Vec<(String, T)>, PachyDarn> {
+        let mut rconn = pool.get().await?;
+        
+        use mobc_redis::redis::streams::{StreamReadOptions, StreamReadReply};
+        
+        // Using a count of 10 for efficient batching
+        let options = StreamReadOptions::default().count(10); 
+        let reply: StreamReadReply = rconn.xread_options(&[T::stream_key()], &[id], &options).await?;
+        
+        let mut results = Vec::new();
+        for stream in reply.keys {
+            for entry in stream.ids {
+                if let Some(jz_value) = entry.map.get(T::field_name()) {
+                    if let mobc_redis::redis::Value::Data(bytes) = jz_value {
+                        let jz = String::from_utf8_lossy(bytes);
+                        let t: T = serde_json::from_str(&jz)?;
+                        // We now return the entry.id so the caller can track progress
+                        results.push((entry.id, t));
+                    }
+                }
+            }
+        }
+        Ok(results)
+    }
+} // END mod rediserde
+
+
+
+// see https://gemini.google.com/app/6e3174a7a8de4148
+#[async_trait]
+pub trait LoadLevelList: Serialize + DeserializeOwned + Send + Sync {
+    /// The Redis key used for the List (LPUSH/BRPOP)
+    fn list_key() -> &'static str;
 }
 
 
+// see https://gemini.google.com/app/6e3174a7a8de4148 
+#[async_trait]
+pub trait LoadLevelX: Serialize + DeserializeOwned + Send + Sync {
+    /// The Redis key used for the Stream (XADD/XREAD)
+    fn stream_key() -> &'static str;
+    
+    /// The field name within the stream entry where the JSON payload is stored
+    fn field_name() -> &'static str { "data" }
+}
+
+
+/// Push a struct onto the head of a list (Writer)
+pub async fn list_push<T: LoadLevelList>(pool: &RedisPool, value: &T) -> Result<(), PachyDarn> {
+    let mut rconn = pool.get().await?;
+    let jz: String = serde_json::to_string(value)?;
+    let _: () = rconn.lpush(T::list_key(), jz).await?;
+    Ok(())
+}
+
+/// Pop a struct from the tail of a list, blocking until available (Reader)
+/// timeout_seconds: 0 means block indefinitely
+pub async fn list_pop_blocking<T: LoadLevelList>(pool: &RedisPool, timeout_seconds: usize) -> Result<Option<T>, PachyDarn> {
+    let mut rconn = pool.get().await?;
+    // brpop returns Option<(String, String)> -> (key, value)
+    let res: Option<(String, String)> = rconn.brpop(T::list_key(), timeout_seconds).await?;
+    
+    match res {
+        Some((_key, jz)) => {
+            let t: T = serde_json::from_str(&jz)?;
+            Ok(Some(t))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Add a struct to a Redis Stream (Writer)
+pub async fn stream_add<T: LoadLevelX>(pool: &RedisPool, value: &T) -> Result<(), PachyDarn> {
+    let mut rconn = pool.get().await?;
+    let jz: String = serde_json::to_string(value)?;
+    // "*" tells Redis to generate the ID automatically
+    let _: String = rconn.xadd(T::stream_key(), "*", &[(T::field_name(), jz)]).await?;
+    Ok(())
+}
+
+/// Read new entries from a stream starting from a specific ID (Reader)
+/// Use "$" as the id to read only new entries since the call started, or "0" for all.
+pub async fn stream_read<T: LoadLevelX>(pool: &RedisPool, id: &str) -> Result<Vec<T>, PachyDarn> {
+    let mut rconn = pool.get().await?;
+    
+    // xread returns StreamReadReply
+    use mobc_redis::redis::streams::{StreamReadOptions, StreamReadReply};
+    
+    let options = StreamReadOptions::default().count(10); // Batch size of 10
+    let reply: StreamReadReply = rconn.xread_options(&[T::stream_key()], &[id], &options).await?;
+    
+    let mut results = Vec::new();
+    for stream in reply.keys {
+        for entry in stream.ids {
+            if let Some(jz_value) = entry.map.get(T::field_name()) {
+                // Redis streams store values as redis::Value; convert to String then T
+                if let mobc_redis::redis::Value::Data(bytes) = jz_value {
+                    let jz = String::from_utf8_lossy(bytes);
+                    let t: T = serde_json::from_str(&jz)?;
+                    results.push(t);
+                }
+            }
+        }
+    }
+    Ok(results)
+}
 
 
 
